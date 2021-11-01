@@ -481,10 +481,8 @@ static int io_wqe_worker(void *data)
 	struct io_wqe *wqe = worker->wqe;
 	struct io_wq *wq = wqe->wq;
 	char buf[TASK_COMM_LEN];
-
 	worker->flags |= (IO_WORKER_F_UP | IO_WORKER_F_RUNNING);
 	io_wqe_inc_running(worker);
-
 	sprintf(buf, "iou-wrk-%d", wq->task_pid);
 	set_task_comm(current, buf);
 
@@ -580,7 +578,6 @@ static bool create_io_worker(struct io_wq *wq, struct io_wqe *wqe, int index)
 	init_completion(&worker->ref_done);
 
 	atomic_inc(&wq->worker_refs);
-
 	tsk = create_io_thread(io_wqe_worker, worker, wqe->node);
 	if (IS_ERR(tsk)) {
 		if (atomic_dec_and_test(&wq->worker_refs))
@@ -612,7 +609,7 @@ static inline bool io_wqe_need_worker(struct io_wqe *wqe, int index)
 	__must_hold(wqe->lock)
 {
 	struct io_wqe_acct *acct = &wqe->acct[index];
-
+  
 	if (acct->nr_workers && test_bit(IO_WQ_BIT_EXIT, &wqe->wq->state))
 		return false;
 	/* if we have available workers or no work, no need */
@@ -648,6 +645,7 @@ static bool io_wq_for_each_worker(struct io_wqe *wqe,
 
 static bool io_wq_worker_wake(struct io_worker *worker, void *data)
 {
+	set_notify_signal(worker->task);
 	wake_up_process(worker->task);
 	return false;
 }
@@ -675,6 +673,23 @@ static void io_wq_check_workers(struct io_wq *wq)
 			create_io_worker(wq, wqe, IO_WQ_ACCT_UNBOUND);
 	}
 }
+static bool io_wq_work_match_all(struct io_wq_work *work, void *data)
+{
+	return true;
+}
+
+static void io_wq_cancel_pending(struct io_wq *wq)
+{
+	struct io_cb_cancel_data match = {
+		.fn		= io_wq_work_match_all,
+		.cancel_all	= true,
+	};
+	int node;
+
+	for_each_node(node)
+		io_wqe_cancel_pending_work(wq->wqes[node], &match);
+}
+
 
 static bool io_wq_work_match_all(struct io_wq_work *work, void *data)
 {
@@ -793,6 +808,7 @@ static void io_wqe_enqueue(struct io_wqe *wqe, struct io_wq_work *work)
 	/* Can only happen if manager creation fails after exec */
 	if (io_wq_fork_manager(wqe->wq) ||
 	    test_bit(IO_WQ_BIT_EXIT, &wqe->wq->state)) {
+
 		work->flags |= IO_WQ_WORK_CANCEL;
 		wqe->wq->do_work(work);
 		return;
@@ -1071,6 +1087,12 @@ void io_wq_put(struct io_wq *wq)
 {
 	if (refcount_dec_and_test(&wq->refs))
 		io_wq_destroy(wq);
+}
+void io_wq_put_and_exit(struct io_wq *wq)
+{
+	set_bit(IO_WQ_BIT_EXIT, &wq->state);
+	io_wq_destroy_manager(wq);
+	io_wq_put(wq);
 }
 
 void io_wq_put_and_exit(struct io_wq *wq)

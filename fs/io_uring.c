@@ -1650,7 +1650,6 @@ static void io_dismantle_req(struct io_kiocb *req)
 		io_put_file(req, req->file, (req->flags & REQ_F_FIXED_FILE));
 	if (req->fixed_rsrc_refs)
 		percpu_ref_put(req->fixed_rsrc_refs);
-
 	if (req->flags & REQ_F_INFLIGHT) {
 		struct io_ring_ctx *ctx = req->ctx;
 		unsigned long flags;
@@ -1745,7 +1744,6 @@ static void io_fail_links(struct io_kiocb *req)
 
 		trace_io_uring_fail_link(req, link);
 		io_cqring_fill_event(link, -ECANCELED);
-
 		io_put_req_deferred(link, 2);
 		link = nxt;
 	}
@@ -1831,6 +1829,8 @@ static bool __tctx_task_work(struct io_uring_task *tctx)
 static void tctx_task_work(struct callback_head *cb)
 {
 	struct io_uring_task *tctx = container_of(cb, struct io_uring_task, task_work);
+	
+	clear_bit(0, &tctx->task_state);
 
 	clear_bit(0, &tctx->task_state);
 
@@ -2421,6 +2421,7 @@ static bool io_rw_should_reissue(struct io_kiocb *req)
 		return false;
 	if ((req->flags & REQ_F_NOWAIT) || (io_wq_current_is_worker() &&
 	    !(ctx->flags & IORING_SETUP_IOPOLL)))
+
 		return false;
 	/*
 	 * If ref is dying, we might be running poll reap from the exit work.
@@ -2478,6 +2479,17 @@ static void io_complete_rw(struct kiocb *kiocb, long res, long res2)
 static void io_complete_rw_iopoll(struct kiocb *kiocb, long res, long res2)
 {
 	struct io_kiocb *req = container_of(kiocb, struct io_kiocb, rw.kiocb);
+#ifdef CONFIG_BLOCK
+	if (res == -EAGAIN && io_rw_should_reissue(req)) {
+		struct io_async_rw *rw = req->async_data;
+
+		if (rw)
+			iov_iter_revert(&rw->iter,
+					req->result - iov_iter_count(&rw->iter));
+		else if (!io_resubmit_prep(req))
+			res = -EIO;
+	}
+#endif
 
 #ifdef CONFIG_BLOCK
 	/* Rewind iter, if we have one. iopoll path resubmits as usual */
@@ -4968,6 +4980,7 @@ static void __io_queue_proc(struct io_poll_iocb *poll, struct io_poll_table *pt,
 			pt->error = -EINVAL;
 			return;
 		}
+
 		/* double add on the same waitqueue head, ignore */
 		if (poll->head == head)
 			return;
@@ -6205,7 +6218,6 @@ static void __io_queue_sqe(struct io_kiocb *req)
 	int ret;
 
 	ret = io_issue_sqe(req, IO_URING_F_NONBLOCK|IO_URING_F_COMPLETE_DEFER);
-
 	/*
 	 * We async punt it if the file wasn't marked NOWAIT, or if the file
 	 * doesn't support non-blocking read/write attempts
@@ -6763,13 +6775,11 @@ static int io_sq_thread(void *data)
 			io_sq_thread_parkme(sqd);
 		mutex_lock(&sqd->lock);
 	}
-
 	sqd->thread = NULL;
 	list_for_each_entry(ctx, &sqd->ctx_list, sqd_list) {
 		ctx->sqo_exec = 1;
 		io_ring_set_wakeup_flag(ctx);
 	}
-
 	complete(&sqd->exited);
 	mutex_unlock(&sqd->lock);
 	do_exit(0);
@@ -8508,7 +8518,6 @@ static bool io_run_ctx_fallback(struct io_ring_ctx *ctx)
 	bool executed = false;
 
 	do {
-
 		work = xchg(&ctx->exit_task_work, NULL);
 		if (!work)
 			break;
@@ -8538,6 +8547,7 @@ static void io_ring_exit_work(struct work_struct *work)
 	 */
 	do {
 		io_uring_try_cancel_requests(ctx, NULL, NULL);
+
 	} while (!wait_for_completion_timeout(&ctx->ref_comp, HZ/20));
 	io_ring_ctx_free(ctx);
 }
@@ -8765,7 +8775,6 @@ static int io_uring_add_task_file(struct io_ring_ctx *ctx, struct file *file)
 				fput(file);
 				return ret;
 			}
-
 		}
 		tctx->last = file;
 	}
@@ -8992,7 +9001,7 @@ static int io_sqpoll_wait_sq(struct io_ring_ctx *ctx)
 		if (!io_sqring_full(ctx))
 			break;
 		prepare_to_wait(&ctx->sqo_sq_wait, &wait, TASK_INTERRUPTIBLE);
-
+    
 		if (!io_sqring_full(ctx))
 			break;
 

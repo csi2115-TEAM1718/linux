@@ -2410,6 +2410,27 @@ struct mm_struct *copy_init_mm(void)
 {
 	return dup_mm(NULL, &init_mm);
 }
+struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node)
+{
+	unsigned long flags = CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|
+		CLONE_IO;
+	struct kernel_clone_args args = {
+		.flags		= ((lower_32_bits(flags) | CLONE_VM |
+					CLONE_UNTRACED) & ~CSIGNAL),
+		.exit_signal	= (lower_32_bits(flags) & CSIGNAL),
+		.stack		= (unsigned long)fn,
+		.stack_size	= (unsigned long)arg,
+		.io_thread	= 1,
+	};
+	struct task_struct *tsk;
+
+	tsk = copy_process(NULL, 0, node, &args);
+	if (!IS_ERR(tsk)) {
+		sigfillset(&tsk->blocked);
+		sigdelsetmask(&tsk->blocked, sigmask(SIGKILL));
+	}
+	return tsk;
+}
 
 /*
  * This is like kernel_clone(), but shaved down and tailored to just
