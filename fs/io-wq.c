@@ -770,7 +770,6 @@ append:
 
 static int io_wq_fork_manager(struct io_wq *wq)
 {
-	int ret;
 	struct task_struct *tsk;
 
 	if (wq->manager)
@@ -784,8 +783,7 @@ static int io_wq_fork_manager(struct io_wq *wq)
 		return 0;
 	}
 
-	io_wq_put(wq);
-	return ret;
+
 	return PTR_ERR(tsk);
 
 }
