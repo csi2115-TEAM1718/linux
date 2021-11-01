@@ -1,0 +1,16 @@
+diff --cc Makefile
+index f9b54da2fca0,bc19584fee59..000000000000
+--- a/Makefile
++++ b/Makefile
+@@@ -2,7 -2,7 +2,11 @@@
+  VERSION = 5
+  PATCHLEVEL = 12
+  SUBLEVEL = 0
+++<<<<<<< HEAD
+ +EXTRAVERSION = -rc1
+++=======
++ EXTRAVERSION = -rc8
+++>>>>>>> bf05bf16c76b... Linux 5.12-rc8
+  NAME = Frozen Wasteland
+  
+  # *DOCUMENTATION*
